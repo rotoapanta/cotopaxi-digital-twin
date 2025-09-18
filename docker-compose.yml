@@ -1,0 +1,43 @@
+# docker-compose.yml
+version: "3.9"
+services:
+  influxdb:
+    image: influxdb:2.7
+    ports: ["8086:8086"]
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUX_USER}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUX_PASS}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUX_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUX_BUCKET}
+    volumes:
+      - influx-data:/var/lib/influxdb2
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    ports: ["3000:3000"]
+    depends_on: [influxdb]
+    environment:
+      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
+
+  api:
+    build: ./backend
+    ports: ["8000:8000"]
+    depends_on: [influxdb]
+    env_file: .env
+
+  simulators:
+    build: ./simulators
+    depends_on: [api, influxdb]
+    env_file: .env
+    command: ["python", "generator.py"]  # loop continuo
+
+  web:
+    image: nginx:alpine
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+    ports: ["8080:80"]
+    depends_on: [api]
+
+volumes:
+  influx-data:
