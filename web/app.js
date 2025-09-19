@@ -19,7 +19,16 @@
   }
 
   // 2) Providers (Ion)
-  const terrainProvider = new Cesium.EllipsoidTerrainProvider();
+  // Terreno real 3D: Cesium World Terrain (requiere token). Fallback a elipsoide si falla.
+  const terrainProvider = await (async () => {
+    try {
+      return await Cesium.createWorldTerrainAsync();
+    } catch (e) {
+      showErr('No se pudo cargar Cesium World Terrain. Usando elipsoidal.');
+      return new Cesium.EllipsoidTerrainProvider();
+    }
+  })();
+
   // Capa base: usar el mismo provider estable que en test (OpenStreetMapImageryProvider)
   let baseImagery = null;
   try {
@@ -48,6 +57,12 @@
     animation: false,
     timeline: false
   });
+
+  // Ajustes para resaltar el relieve del Cotopaxi
+  try { viewer.scene.globe.terrainExaggeration = 1.35; } catch(_) {}
+  viewer.scene.globe.depthTestAgainstTerrain = true;
+  viewer.scene.globe.enableLighting = true;
+  viewer.scene.msaaSamples = 4;
 
   // Añadir capa base ahora, igual que en test.html
   if (baseImagery) {
