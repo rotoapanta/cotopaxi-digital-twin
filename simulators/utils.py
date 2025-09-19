@@ -1,18 +1,35 @@
-# simulators/utils.py
-import os
-from influxdb_client import InfluxDBClient, Point
-from influxdb_client.client.write_api import SYNCHRONOUS
+import os, time
+from influxdb_client import InfluxDBClient, Point, WriteOptions
 
-client = InfluxDBClient(url=os.getenv("INFLUX_URL"),
-                        token=os.getenv("INFLUX_TOKEN"),
-                        org=os.getenv("INFLUX_ORG"))
+INFLUX_URL = os.getenv("INFLUX_URL")
+INFLUX_ORG = os.getenv("INFLUX_ORG")
+INFLUX_BUCKET = os.getenv("INFLUX_BUCKET")
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN")
+INFLUX_USER = os.getenv("INFLUX_USER")
+INFLUX_PASS = os.getenv("INFLUX_PASS")
 
-write_api = client.write_api(write_options=SYNCHRONOUS)
-bucket = os.getenv("INFLUX_BUCKET")
+if INFLUX_TOKEN:
+    client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+else:
+    client = InfluxDBClient(url=INFLUX_URL, org=INFLUX_ORG,
+                            username=INFLUX_USER, password=INFLUX_PASS)
+
+write_api = client.write_api(write_options=WriteOptions(batch_size=100, flush_interval=1000))
 
 def write_influx(points):
-    """Escribe una lista de puntos en InfluxDB"""
-    pts = []
-    for p in points:
-        pts.append(Point(p[0]).tag(p[1].keys(), p[1].values()).field(p[2]))
-    write_api.write(bucket=bucket, record=pts)
+    ts = int(time.time()*1e9)  # nanosegundos
+    payload = []
+    for measurement, tags, fields in points:
+        p = Point(measurement)
+        for k, v in tags.items(): p = p.tag(k, v)
+        for k, v in fields.items():
+            # Asegurar tipos numéricos
+            if isinstance(v, (int, float)): p = p.field(k, v)
+            else:
+                try:
+                    p = p.field(k, float(v))
+                except Exception:
+                    continue
+        p = p.time(ts)
+        payload.append(p)
+    write_api.write(bucket=INFLUX_BUCKET, record=payload)

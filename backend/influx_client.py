@@ -1,39 +1,55 @@
-# backend/influx_client.py
-import os
+from typing import Dict, List, Optional
 from influxdb_client import InfluxDBClient
+from settings import settings
 
-client = InfluxDBClient(url=os.getenv("INFLUX_URL"),
-                        token=f"{os.getenv('INFLUX_USER')}:{os.getenv('INFLUX_PASS')}",
-                        org=os.getenv("INFLUX_ORG"))
-query_api = client.query_api()
-bucket = os.getenv("INFLUX_BUCKET")
+# Preferir token si existe; si no, intentar basic auth con user/pass
+if settings.influx_token:
+    _client = InfluxDBClient(url=settings.influx_url,
+                             token=settings.influx_token,
+                             org=settings.influx_org)
+else:
+    _client = InfluxDBClient(url=settings.influx_url,
+                             org=settings.influx_org,
+                             username=settings.influx_user,
+                             password=settings.influx_pass)
 
-def last(measurement):
+_query = _client.query_api()
+_bucket = settings.influx_bucket
+
+def last_point(measurement: str) -> Optional[Dict[str, float]]:
     q = f'''
-    from(bucket:"{bucket}")
+    from(bucket:"{_bucket}")
       |> range(start: -5m)
       |> filter(fn: (r) => r._measurement == "{measurement}")
       |> last()
     '''
-    tables = query_api.query(q)
-    out = {}
+    tables = _query.query(q)
+    values: Dict[str, float] = {}
     for t in tables:
         for r in t.records:
-            out.setdefault(r.get_field(), r.get_value())
-    return out
+            fld = r.get_field()
+            val = r.get_value()
+            if isinstance(val, (int, float)):
+                values[fld] = float(val)
+    return values or None
 
-def query_range(measurement, start, station):
+def query_range_points(measurement: str, start: str, station: str) -> List[Dict]:
     q = f'''
-    from(bucket:"{bucket}")
+    from(bucket:"{_bucket}")
       |> range(start: {start})
       |> filter(fn: (r) => r._measurement == "{measurement}")
       |> filter(fn: (r) => r.station == "{station}")
       |> keep(columns: ["_time","_field","_value"])
       |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+      |> sort(columns: ["_time"])
     '''
-    tables = query_api.query(q)
-    res = []
+    tables = _query.query(q)
+    rows: List[Dict] = []
     for t in tables:
         for r in t.records:
-            res.append({"time":str(r["_time"]), **{k:r[k] for k in r.values.keys() if k not in ["_time"]}})
-    return res
+            time_iso = r.get_time().isoformat()
+            vals = {k: float(v) for k, v in r.values.items()
+                    if (k not in ["result", "table", "_time"]
+                        and isinstance(v, (int, float)))}
+            rows.append({"time": time_iso, "values": vals})
+    return rows

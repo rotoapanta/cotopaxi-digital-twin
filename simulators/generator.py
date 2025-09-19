@@ -1,5 +1,5 @@
 # simulators/generator.py
-import time, random
+import time
 from tilt_sim import gen_tilt
 from gnss_sim import gen_gnss
 from infra_sim import gen_infrasound
@@ -7,34 +7,37 @@ from rain_sim import gen_rain
 from gas_sim import gen_gas
 from utils import write_influx
 
-STATION = "COTO-N"  # norte del cráter; añade más: COTO-S, COTO-W...
+STATIONS = ["COTO-N"]  # agrega COTO-S, COTO-E, COTO-W si quieres
 PERIOD_S = 2
 
 if __name__ == "__main__":
     while True:
-        t = time.time()
-        tilt = gen_tilt(t)
-        gnss = gen_gnss(t)
-        infra = gen_infrasound(t)
-        rain = gen_rain(t)
-        gas = gen_gas(t)
+        now = time.time()
+        for st in STATIONS:
+            tilt = gen_tilt(now)
+            gnss = gen_gnss(now)
+            infra = gen_infrasound(now)
+            rain = gen_rain(now)
+            gas = gen_gas(now)
 
-        # Simple rule-based: lahar_risk si lluvia alta y tilt estable
-        lahar_risk = (rain["rate_mm_h"] > 20.0)
-        # eruption_candidate si uplift y SO2 suben y hay infrasonido impulsivo
-        eruption_candidate = (gnss["uplift_mm"] > 5 and gas["so2_ppm"] > 6 and infra["pa_peak"] > 30)
+            lahar_risk = (rain["rate_mm_h"] > 20.0)
+            eruption_candidate = (gnss["uplift_mm"] > 5
+                                  and gas["so2_ppm"] > 6
+                                  and infra["pa_peak"] > 30)
 
-        points = [
-            ("tilt", {"station": STATION}, tilt),
-            ("gnss", {"station": STATION}, gnss),
-            ("infrasound", {"station": STATION}, infra),
-            ("rain", {"station": STATION}, rain),
-            ("gas", {"station": STATION}, gas),
-        ]
-        if lahar_risk:
-            points.append(("events", {"source": "rule"}, {"type":"lahar_risk","level":"WARN","score":0.7}))
-        if eruption_candidate:
-            points.append(("events", {"source": "rule"}, {"type":"eruption_candidate","level":"ALERT","score":0.9}))
+            points = [
+                ("tilt", {"station": st}, tilt),
+                ("gnss", {"station": st}, gnss),
+                ("infrasound", {"station": st}, infra),
+                ("rain", {"station": st}, rain),
+                ("gas", {"station": st}, gas),
+            ]
+            if lahar_risk:
+                points.append(("events", {"source": "rule", "station": st},
+                               {"score": 0.7, "type": "lahar_risk", "level": 1.0}))
+            if eruption_candidate:
+                points.append(("events", {"source": "rule", "station": st},
+                               {"score": 0.9, "type": "eruption_candidate", "level": 2.0}))
 
-        write_influx(points)
+            write_influx(points)
         time.sleep(PERIOD_S)
